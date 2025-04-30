@@ -21,7 +21,8 @@ source .venv/bin/activate
 ### Installation
 
 1. Ensure you have Python 3.6+ installed
-2. Install the required dependencies:
+2. Ensure you have ffmpeg installed
+3. Install the required dependencies:
 
 ```
 pip install -r requirements.txt

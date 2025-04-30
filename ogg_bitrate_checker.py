@@ -7,6 +7,44 @@ import glob
 from tqdm import tqdm
 from tinytag import TinyTag
 import concurrent.futures
+import subprocess
+
+def check_file_corruption_ffmpeg(file_path):
+    """
+    Check if an audio file is corrupted using FFmpeg's thorough validation.
+    This will attempt to transcode the file, which is a stronger validation
+    than just checking metadata.
+    
+    Returns: (is_corrupt, error_message)
+    """
+    try:
+        # Use ffmpeg with aggressive error detection and null output
+        cmd = [
+            'ffmpeg', 
+            '-v', 'error',           # Only show errors
+            '-i', file_path,         # Input file
+            '-f', 'null',            # Output to null
+            '-err_detect', 'aggressive',  # Use aggressive error detection
+            '-'                      # Pipe to stdout (which is discarded)
+        ]
+        
+        # Run ffmpeg and capture any error output
+        result = subprocess.run(
+            cmd, 
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        
+        # If any error output exists, the file is corrupt
+        if result.stderr.strip():
+            return True, result.stderr.strip()
+        
+        return False, ""
+        
+    except Exception as e:
+        # If ffmpeg couldn't even run, mark as corrupt
+        return True, str(e)
 
 def check_bitrate(file_path, target_bitrate):
     """Check if the given OGG file has the target bitrate."""
@@ -21,15 +59,8 @@ def check_bitrate(file_path, target_bitrate):
         tag = TinyTag.get(file_path)
         actual_bitrate = tag.bitrate
         
-        # Attempt to detect corruption by checking if we can read audio properties
-        is_corrupt = False
-        try:
-            # Try to access audio properties that should be present in valid files
-            duration = tag.duration
-            if duration is None or duration <= 0:
-                is_corrupt = True
-        except Exception:
-            is_corrupt = True
+        # Check for corruption using FFmpeg
+        is_corrupt, corruption_error = check_file_corruption_ffmpeg(file_path)
         
         # Some files might report bitrate as None
         if actual_bitrate is None:
@@ -46,7 +77,8 @@ def check_bitrate(file_path, target_bitrate):
             'matches': matches,
             'file_size': file_size,
             'is_defective_size': is_defective_size,
-            'is_corrupt': is_corrupt
+            'is_corrupt': is_corrupt,
+            'corruption_error': corruption_error if is_corrupt else ""
         }
     except Exception as e:
         return f"Error reading {file_path}: {str(e)}"
@@ -89,6 +121,8 @@ def main():
                        help=f'Number of threads to use for processing (default: CPU count * 5')
     parser.add_argument('--dry-run', action='store_true',
                         help='Do not delete files, just report what would be deleted')
+    parser.add_argument('--verbose', action='store_true',
+                        help='Verbose output')
     
     args = parser.parse_args()
     
@@ -117,112 +151,107 @@ def main():
         defective_size_files = []
         corrupt_files = []
         
-        matches = 0
-        non_matches = 0
-        errors = 0
-        deleted_count = 0
-        defective_size_count = 0
-        corrupt_count = 0
-        
         for result in results:
             if isinstance(result, str):  # Error message
                 error_messages.append(result)
-                errors += 1
             else:
                 file_path = result['file']
                 actual = result['actual_bitrate']
                 matches_target = result['matches']
                 should_delete = False
+                delete_reason = ""
                 
                 # Check for defective size
                 if result.get('is_defective_size', False):
                     size_mb = result['file_size'] / 1048576
                     defective_size_files.append(f"{file_path}: {size_mb:.2f} MB")
-                    defective_size_count += 1
                     # Mark for deletion if flag is set
                     if args.delete:
                         should_delete = True
-                
+                        delete_reason = "Defective size (<1MB)"
+
                 # Check for corruption
                 if result.get('is_corrupt', False):
                     corrupt_files.append(f"{file_path}")
-                    corrupt_count += 1
                     # Mark for deletion if flag is set
                     if args.delete:
                         should_delete = True
+                        delete_reason = "Corrupted, error: " + result.get('corruption_error', "")
                 
                 if matches_target:
                     matching_files.append(f"{file_path}: {actual} kbps")
-                    matches += 1
                 else:
                     non_matching_files.append(f"{file_path}: {actual} kbps")
-                    non_matches += 1
                     # Mark for deletion if flag is set
                     if args.delete:
                         should_delete = True
+                        delete_reason = "Non-matching bitrate, current bitrate: " + str(actual) + " kbps"
 
                 # Dry run
                 if args.dry_run and should_delete:
-                    deleted_files.append(f"{file_path}: {actual} kbps")
-                    deleted_count += 1
+                    if args.verbose:
+                        deleted_files.append(f"{file_path}\nReason: {delete_reason}")
+                    else:
+                        deleted_files.append(f"{file_path}")
                     continue
                 
                 # Delete file if needed
                 if should_delete and args.delete and not args.dry_run:
                     try:
                         os.remove(file_path)
-                        deleted_files.append(f"{file_path}: {actual} kbps")
-                        deleted_count += 1
+                        if args.verbose:
+                            deleted_files.append(f"{file_path}\nReason: {delete_reason}")
+                        else:
+                            deleted_files.append(f"{file_path}")
                     except Exception as e:
                         error_messages.append(f"Failed to delete {file_path}: {str(e)}")
-                        errors += 1
         
         # Add matching files section
-        if matching_files:
-            output_lines.append(f"\n✓ MATCHING FILES ({matches}):")
+        if matching_files and args.verbose:
+            output_lines.append(f"\n✓ MATCHING FILES ({len(matching_files)}):")
             output_lines.append("-" * 60)
             output_lines.extend(matching_files)
         
         # Add non-matching files section
         if non_matching_files:
-            output_lines.append(f"\n✗ NON-MATCHING FILES ({non_matches}):")
+            output_lines.append(f"\n✗ NON-MATCHING FILES ({len(non_matching_files)}):")
             output_lines.append("-" * 60)
             output_lines.extend(non_matching_files)
         
         # Add defective size files section
         if defective_size_files:
-            output_lines.append(f"\n⚠ DEFECTIVE SIZE FILES (<1MB) ({defective_size_count}):")
+            output_lines.append(f"\n⚠ DEFECTIVE SIZE FILES (<1MB) ({len(defective_size_files)}):")
             output_lines.append("-" * 60)
             output_lines.extend(defective_size_files)
         
         # Add corrupt files section
         if corrupt_files:
-            output_lines.append(f"\n⚠ POTENTIALLY CORRUPTED FILES ({corrupt_count}):")
+            output_lines.append(f"\n⚠ POTENTIALLY CORRUPTED FILES ({len(corrupt_files)}):")
             output_lines.append("-" * 60)
             output_lines.extend(corrupt_files)
 
         # Add deleted files section
         if deleted_files:
-            output_lines.append(f"\nDELETED FILES ({deleted_count}):")
+            output_lines.append(f"\nDELETED FILES ({len(deleted_files)}):")
             output_lines.append("-" * 60)
             output_lines.extend(deleted_files)
         
         # Add error section if any
         if error_messages:
-            output_lines.append(f"\nERRORS ({errors}):")
+            output_lines.append(f"\nERRORS ({len(error_messages)}):")
             output_lines.append("-" * 60)
             output_lines.extend(error_messages)
         
         # Add summary
         output_lines.append("\n" + "=" * 60)
-        summary = f"Summary: {matches} matches, {non_matches} non-matches"
+        summary = f"Summary: {len(matching_files)} matches, {len(non_matching_files)} non-matches"
+        if len(defective_size_files) > 0:
+            summary += f", {len(defective_size_files)} defective size"
+        if len(corrupt_files) > 0:
+            summary += f", {len(corrupt_files)} potentially corrupted"
         if args.delete:
-            summary += f" ({deleted_count} deleted)"
-        if defective_size_count:
-            summary += f", {defective_size_count} defective size"
-        if corrupt_count:
-            summary += f", {corrupt_count} potentially corrupted"
-        summary += f", {errors} errors"
+            summary += f", {len(deleted_files)} deleted"
+        summary += f", {len(error_messages)} errors"
         output_lines.append(summary)
     
     # Print to console
