@@ -56,6 +56,7 @@ def main():
     parser.add_argument('path', help='Path to an OGG file or directory containing OGG files')
     parser.add_argument('bitrate', type=int, help='Target bitrate to check for (e.g., 320)')
     parser.add_argument('--log-file', help='Path to log file (default: bitrate_check_YYYY-MM-DD_HH-MM-SS.log)')
+    parser.add_argument('--delete', action='store_true', help='Delete files that do not match the target bitrate')
     
     args = parser.parse_args()
     
@@ -80,10 +81,12 @@ def main():
         matching_files = []
         non_matching_files = []
         error_messages = []
+        deleted_files = []
         
         matches = 0
         non_matches = 0
         errors = 0
+        deleted_count = 0
         
         for result in results:
             if isinstance(result, str):  # Error message
@@ -100,6 +103,16 @@ def main():
                 else:
                     non_matching_files.append(f"{file_path}: {actual} kbps")
                     non_matches += 1
+                    
+                    # Delete non-matching files if --delete flag is set
+                    if args.delete:
+                        try:
+                            os.remove(file_path)
+                            deleted_files.append(f"{file_path}: {actual} kbps")
+                            deleted_count += 1
+                        except Exception as e:
+                            error_messages.append(f"Failed to delete {file_path}: {str(e)}")
+                            errors += 1
         
         # Add matching files section
         if matching_files:
@@ -109,9 +122,15 @@ def main():
         
         # Add non-matching files section
         if non_matching_files:
-            output_lines.append(f"\n✗ NON-MATCHING FILES ({non_matches}):")
+            if args.delete:
+                output_lines.append(f"\n✗ NON-MATCHING FILES ({non_matches}) - DELETED ({deleted_count}):")
+            else:
+                output_lines.append(f"\n✗ NON-MATCHING FILES ({non_matches}):")
             output_lines.append("-" * 60)
-            output_lines.extend(non_matching_files)
+            if args.delete:
+                output_lines.extend(deleted_files)
+            else:
+                output_lines.extend(non_matching_files)
         
         # Add error section if any
         if error_messages:
@@ -121,7 +140,10 @@ def main():
         
         # Add summary
         output_lines.append("\n" + "=" * 60)
-        output_lines.append(f"Summary: {matches} matches, {non_matches} non-matches, {errors} errors")
+        if args.delete:
+            output_lines.append(f"Summary: {matches} matches, {non_matches} non-matches ({deleted_count} deleted), {errors} errors")
+        else:
+            output_lines.append(f"Summary: {matches} matches, {non_matches} non-matches, {errors} errors")
     
     # Print to console
     for line in output_lines:

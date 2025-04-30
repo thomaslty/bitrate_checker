@@ -30,7 +30,7 @@ pip install -r requirements.txt
 ## Usage
 
 ```
-python ogg_bitrate_checker.py PATH BITRATE [--log-file LOG_FILE]
+python ogg_bitrate_checker.py PATH BITRATE [--log-file LOG_FILE] [--delete]
 ```
 
 Arguments:
@@ -39,6 +39,7 @@ Arguments:
 
 Optional arguments:
 - `--log-file LOG_FILE`: Custom path for the log file (default: bitrate_check_YYYY-MM-DD_HH-MM-SS.log)
+- `--delete`: Delete files that do not match the target bitrate (use with caution!)
 
 ## Examples
 
@@ -50,6 +51,11 @@ python ogg_bitrate_checker.py music/song.ogg 320
 Check all OGG files in a directory:
 ```
 python ogg_bitrate_checker.py music/ 320
+```
+
+Check files and delete those that don't match the target bitrate:
+```
+python ogg_bitrate_checker.py music/ 320 --delete
 ```
 
 ## Output
