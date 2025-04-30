@@ -3,6 +3,8 @@ import os
 import sys
 import argparse
 import datetime
+import glob
+from tqdm import tqdm
 from tinytag import TinyTag
 
 def check_bitrate(file_path, target_bitrate):
@@ -32,23 +34,20 @@ def check_bitrate(file_path, target_bitrate):
         return f"Error reading {file_path}: {str(e)}"
 
 def process_path(path, target_bitrate):
-    """Process a file or recursively process a directory."""
+    """Process a file or recursively process a directory using glob."""
     results = []
-    
+
     if os.path.isfile(path):
-        result = check_bitrate(path, target_bitrate)
-        if result:
-            results.append(result)
-    elif os.path.isdir(path):
-        for root, _, files in os.walk(path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                result = check_bitrate(file_path, target_bitrate)
-                if result:
-                    results.append(result)
-    else:
-        print(f"Error: {path} is not a valid file or directory")
+        print(f"Error: {path} is not a valid directory")
         sys.exit(1)
+
+    ogg_files = glob.glob(os.path.join(path, '**', '*.ogg'), recursive=True)
+    print(f"Found {len(ogg_files)} .ogg files in {path}")
+    for file_path in tqdm(ogg_files, desc="Processing files"):
+            result = check_bitrate(file_path, target_bitrate)
+            if result:
+                results.append(result)
+    
         
     return results
 

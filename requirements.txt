@@ -1,1 +1,2 @@
-tinytag==2.1.1 
+tinytag==2.1.1
+tqdm==4.67.1
