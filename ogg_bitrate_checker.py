@@ -6,6 +6,7 @@ import datetime
 import glob
 from tqdm import tqdm
 from tinytag import TinyTag
+import concurrent.futures
 
 def check_bitrate(file_path, target_bitrate):
     """Check if the given OGG file has the target bitrate."""
@@ -33,7 +34,7 @@ def check_bitrate(file_path, target_bitrate):
     except Exception as e:
         return f"Error reading {file_path}: {str(e)}"
 
-def process_path(path, target_bitrate):
+def process_path(path, target_bitrate, max_threads=None):
     """Process a file or recursively process a directory using glob."""
     results = []
 
@@ -43,20 +44,31 @@ def process_path(path, target_bitrate):
 
     ogg_files = glob.glob(os.path.join(path, '**', '*.ogg'), recursive=True)
     print(f"Found {len(ogg_files)} .ogg files in {path}")
-    for file_path in tqdm(ogg_files, desc="Processing files"):
-            result = check_bitrate(file_path, target_bitrate)
+    
+    # Use ThreadPoolExecutor for concurrent processing
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+        # Submit all tasks and create a future-to-filename mapping
+        future_to_file = {executor.submit(check_bitrate, file_path, target_bitrate): file_path 
+                         for file_path in ogg_files}
+        
+        # Process results as they complete with progress bar
+        for future in tqdm(concurrent.futures.as_completed(future_to_file), 
+                           total=len(ogg_files), desc="Processing files"):
+            result = future.result()
             if result:
                 results.append(result)
     
-        
     return results
 
 def main():
+    
     parser = argparse.ArgumentParser(description='Check OGG files for specific bitrate')
     parser.add_argument('path', help='Path to an OGG file or directory containing OGG files')
     parser.add_argument('bitrate', type=int, help='Target bitrate to check for (e.g., 320)')
     parser.add_argument('--log-file', help='Path to log file (default: bitrate_check_YYYY-MM-DD_HH-MM-SS.log)')
     parser.add_argument('--delete', action='store_true', help='Delete files that do not match the target bitrate')
+    parser.add_argument('--threads', type=int, default=None,
+                       help=f'Number of threads to use for processing (default: CPU count * 5')
     
     args = parser.parse_args()
     
@@ -67,7 +79,7 @@ def main():
     else:
         log_file = args.log_file
     
-    results = process_path(args.path, args.bitrate)
+    results = process_path(args.path, args.bitrate, args.threads)
     
     # Prepare results text
     output_lines = []
