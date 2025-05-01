@@ -8,6 +8,7 @@ from tqdm import tqdm
 from tinytag import TinyTag
 import concurrent.futures
 import subprocess
+import shutil
 
 def check_file_corruption_ffmpeg(file_path):
     """
@@ -110,6 +111,9 @@ def process_path(path, target_bitrate, max_threads=None):
     return results
 
 def main():
+    # check if ffmpeg is installed
+    if not shutil.which('ffmpeg'):
+        raise Exception("FFmpeg is not installed")
     
     parser = argparse.ArgumentParser(description='Check OGG files for specific bitrate')
     parser.add_argument('path', help='Path to an OGG file or directory containing OGG files')
